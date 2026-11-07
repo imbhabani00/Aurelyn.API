@@ -1,0 +1,22 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Build files
+bin/
+obj/
+
+# Secret configuration files
+**/appsettings.Development.json
+**/appsettings.Production.json
+
+# Environment files
+.env
+.env.*
+
+# Logs
+*.log
+
+# Test results
+TestResults/
