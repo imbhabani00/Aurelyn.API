@@ -1,4 +1,5 @@
 ﻿using Asp.Versioning;
+using Aurelyn.API.Helper;
 using Aurelyn.Application.Dtos.Response;
 using Aurelyn.Application.Dtos.Response.User;
 using Aurelyn.Application.Services;
@@ -57,18 +58,8 @@ namespace Aurelyn.API.Controllers
             var apiResponse = new ApiResponse();
             try
             {
-                if (model == null || string.IsNullOrWhiteSpace(model.Email) || string.IsNullOrWhiteSpace(model.Password))
-                {
-                    apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest, "Email and password are required.");
-                    return new ObjectResult(apiResponse);
-                }
+                
                 var clientApp = string.IsNullOrWhiteSpace(model.ClientApp) ? "Web" : model.ClientApp.Trim();
-                if (clientApp.Length > 30)
-                {
-                    apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest, "Invalid client app.");
-                    return new ObjectResult(apiResponse);
-                }
-
                 var result = await _userService.AuthenticateAsync(model.Email.Trim(), model.TenantCode);
 
                 if (result == null)
@@ -375,11 +366,11 @@ namespace Aurelyn.API.Controllers
                 }
 
                 var principal = _tokenService.GetPrincipalFromExpiredToken(model.AccessToken);
-                var userIdClaim = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var tenantIdClaim = principal.FindFirst("TenantId")?.Value;
-                var clientApp = principal.FindFirst("ClientApp")?.Value ?? "Web";
+                var userId = principal.GetUserId() ?? 0;
+                var tenantId = principal.GetTenantId() ?? 0;
+                var clientApp = principal.GetClientApp();
 
-                if (!int.TryParse(userIdClaim, out var userId) || !int.TryParse(tenantIdClaim, out var tenantId))
+                if (userId <= 0 || tenantId <= 0)
                 {
                     apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized, "Invalid access token");
                     return new ObjectResult(apiResponse);
@@ -472,8 +463,8 @@ namespace Aurelyn.API.Controllers
                     return new ObjectResult(apiResponse);
                 }
 
-                var userId = GetClaimInt("UserId");
-                var tenantId = GetClaimInt("TenantId");
+                var userId = CurrentUserId ?? 0;
+                var tenantId = CurrentTenantId ?? 0;
                 if (userId <= 0)
                 {
                     apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized, "Invalid access token");
