@@ -1,11 +1,12 @@
 ﻿using Aurelyn.Application.Dtos.Response.Login;
 using Aurelyn.Application.Dtos.Response.OtpResponse;
+using Aurelyn.Application.Dtos.Response.Register;
 using Aurelyn.Application.Dtos.Response.Session;
 using Aurelyn.Application.Dtos.Response.User;
 using Aurelyn.Application.Repositories;
-using Aurelyn.Domain.AuditLog;
-using Aurelyn.Domain.Authuntication;
-using Aurelyn.Domain.Models;
+using Aurelyn.Domain.Models.AuditLog;
+using Aurelyn.Domain.Models.Authuntication;
+using Aurelyn.Domain.Models.User;
 using Aurelyn.Domain.Otp;
 using Aurelyn.Domain.Session;
 using AutoMapper;
@@ -37,6 +38,9 @@ namespace Aurelyn.Application.Services
         Task<bool> RevokeSessionAsync(int userId, string refreshTokenHash);
         Task<int> RevokeAllSessionsAsync(int userId, long? exceptSessionId);
         Task InsertAuditLogAsync(AuditLog auditLog);
+        Task<RegisterResultResponse> RegisterAsync(Register model);
+        Task<UserLookupResponse> GetByEmailAsync(string email, string? tenantCode);
+        Task<bool> ResetPasswordAsync(int userId, int tenantId, string newPassword);
     }
     #endregion
 
@@ -282,6 +286,50 @@ namespace Aurelyn.Application.Services
         public async Task InsertAuditLogAsync(AuditLog auditLog)
         {
             await _userRepository.InsertAuditLog(auditLog);
+        }
+        #endregion
+
+        #region RegisterAsync
+        // ReturnValue: 0 = ok, 1 = tenant not found, 2 = already registered, 3 = default role missing
+        public async Task<RegisterResultResponse> RegisterAsync(Register model)
+        {
+            var passwordHash = HashPassword(model.Password);
+            var result = await _userRepository.Register(
+                model.FirstName.Trim(),
+                model.LastName?.Trim(),
+                model.Email.Trim(),
+                passwordHash,
+                model.TenantCode);
+
+            var response = _mapper.Map<RegisterResult, RegisterResultResponse>(result);
+            return response;
+        }
+        #endregion
+
+        #region GetByEmailAsync
+        // ReturnValue: 0 = found, 1 = not found, 2 = inactive, 4 = no usable password yet
+        public async Task<UserLookupResponse> GetByEmailAsync(string email, string? tenantCode)
+        {
+            var result = await _userRepository.GetByEmail(email, tenantCode);
+            var response = _mapper.Map<UserLookup, UserLookupResponse>(result);
+            return response;
+        }
+        #endregion
+
+        #region ResetPasswordAsync
+        // Used after the reset OTP was verified: no current password is needed.
+        // Saves the new hash, clears any lock, and signs the user out everywhere.
+        public async Task<bool> ResetPasswordAsync(int userId, int tenantId, string newPassword)
+        {
+            var newHash = HashPassword(newPassword);
+            var changed = await _userRepository.ChangePassword(userId, tenantId, newHash);
+            if (!changed)
+            {
+                return false;
+            }
+
+            await _userRepository.RevokeAllSessions(userId, null);
+            return true;
         }
         #endregion
     }

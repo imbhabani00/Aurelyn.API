@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Aurelyn.Domain.Models
+namespace Aurelyn.Domain.Models.User
 {
     public class User
     {

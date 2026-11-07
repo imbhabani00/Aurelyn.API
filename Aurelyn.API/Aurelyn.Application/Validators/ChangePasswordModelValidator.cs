@@ -1,4 +1,4 @@
-﻿using Aurelyn.Domain.Authuntication;
+﻿using Aurelyn.Domain.Models.Authuntication;
 using FluentValidation;
 
 namespace Aurelyn.Application.Validators

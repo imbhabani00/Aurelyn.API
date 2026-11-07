@@ -1,6 +1,6 @@
-﻿using Aurelyn.Domain.AuditLog;
-using Aurelyn.Domain.Authuntication;
-using Aurelyn.Domain.Models;
+﻿using Aurelyn.Domain.Models.AuditLog;
+using Aurelyn.Domain.Models.Authuntication;
+using Aurelyn.Domain.Models.User;
 using Aurelyn.Domain.Otp;
 using Aurelyn.Domain.Session;
 using Dapper;
@@ -30,6 +30,8 @@ namespace Aurelyn.Application.Repositories
         Task<bool> RevokeSession(int userId, string refreshTokenHash);
         Task<int> RevokeAllSessions(int userId, long? exceptSessionId);
         Task InsertAuditLog(AuditLog auditLog);
+        Task<RegisterResult> Register(string firstName, string? lastName, string email, string passwordHash, string? tenantCode);
+        Task<UserLookup> GetByEmail(string email, string? tenantCode);
     }
     #endregion
 
@@ -452,6 +454,61 @@ namespace Aurelyn.Application.Repositories
                 connection.Open();
                 await connection.ExecuteAsync("[dbo].[AuditLogs_Insert]", parameters, commandType: CommandType.StoredProcedure);
             }
+        }
+        #endregion
+
+        #region Register
+        public async Task<RegisterResult> Register(string firstName, string? lastName, string email, string passwordHash, string? tenantCode)
+        {
+            var data = new RegisterResult();
+            using (var connection = CreateConnection())
+            {
+                var parameters = new DynamicParameters();
+                parameters.Add("@TenantCode", tenantCode);
+                parameters.Add("@FirstName", firstName);
+                parameters.Add("@LastName", lastName);
+                parameters.Add("@Email", email);
+                parameters.Add("@PasswordHash", passwordHash);
+                parameters.Add("@ReturnValue", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
+
+                connection.Open();
+                var result = await connection.QueryFirstOrDefaultAsync<RegisterResult>("[dbo].[Users_Register]",
+                    parameters,
+                    commandType: CommandType.StoredProcedure);
+
+                if (result != null)
+                {
+                    data = result;
+                }
+                data.ReturnValue = parameters.Get<int>("@ReturnValue");
+            }
+            return data;
+        }
+        #endregion
+
+        #region GetByEmail
+        public async Task<UserLookup> GetByEmail(string email, string? tenantCode)
+        {
+            var data = new UserLookup();
+            using (var connection = CreateConnection())
+            {
+                var parameters = new DynamicParameters();
+                parameters.Add("@Email", email);
+                parameters.Add("@TenantCode", tenantCode);
+                parameters.Add("@ReturnValue", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
+
+                connection.Open();
+                var result = await connection.QueryFirstOrDefaultAsync<UserLookup>("[dbo].[Users_GetByEmail]",
+                    parameters,
+                    commandType: CommandType.StoredProcedure);
+
+                if (result != null)
+                {
+                    data = result;
+                }
+                data.ReturnValue = parameters.Get<int>("@ReturnValue");
+            }
+            return data;
         }
         #endregion
     }

@@ -1,8 +1,8 @@
 ﻿using Asp.Versioning;
 using Aurelyn.Application.Dtos.Response;
 using Aurelyn.Application.Services;
-using Aurelyn.Domain.AuditLog;
-using Aurelyn.Domain.Authuntication;
+using Aurelyn.Domain.Models.AuditLog;
+using Aurelyn.Domain.Models.Authuntication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
