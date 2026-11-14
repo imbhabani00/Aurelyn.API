@@ -18,6 +18,10 @@
         public string CurrentPassword { get; set; } = string.Empty;
         public string NewPassword { get; set; } = string.Empty;
         public string ConfirmPassword { get; set; } = string.Empty;
+        public string NewPasswordHash { get; set; } = string.Empty;
+        public int UserId { get; set; }
+        public int TenantId { get; set; }
+        public int CurrentSessionId { get; set; }
     }
 
     public class LoginFailureResult
@@ -36,12 +40,15 @@
         public string ConfirmPassword { get; set; } = string.Empty;
         public string? TenantCode { get; set; }
         public string? ClientApp { get; set; }
+        public string? PasswordHash { get; set; }
+        public string? RoleCode { get; set; }
     }
 
     public class ForgotPassword
     {
-        public string Email { get; set; } = string.Empty;
+        public string Email { get; set; } 
         public string? TenantCode { get; set; }
+        public string? ClientApp { get; set; }
     }
 
     public class ResetPassword
@@ -50,6 +57,11 @@
         public string? TenantCode { get; set; }
         public string Code { get; set; } = string.Empty;
         public string NewPassword { get; set; } = string.Empty;
+        public string? CurrentPassword { get; set; } 
         public string ConfirmPassword { get; set; } = string.Empty;
+        public string? NewPasswordHash { get; set; }
+        public int UserId { get; set; }
+        public int CurrentSessionId { get; set; }
+        public int TenantId { get; set; }
     }
 }

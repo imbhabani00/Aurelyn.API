@@ -20,7 +20,6 @@
 
   <ItemGroup>
     <Folder Include="Dtos\Request\Login\" />
-    <Folder Include="Mapper\" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,9 +1,11 @@
-﻿using Aurelyn.Application.Dtos.Response.Login;
+﻿using Aurelyn.Application.Dtos.Response;
+using Aurelyn.Application.Dtos.Response.Login;
 using Aurelyn.Application.Dtos.Response.OtpResponse;
 using Aurelyn.Application.Dtos.Response.Register;
 using Aurelyn.Application.Dtos.Response.Session;
 using Aurelyn.Application.Dtos.Response.User;
 using Aurelyn.Application.Repositories;
+using Aurelyn.Domain.Models;
 using Aurelyn.Domain.Models.AuditLog;
 using Aurelyn.Domain.Models.Authuntication;
 using Aurelyn.Domain.Models.User;
@@ -19,28 +21,29 @@ namespace Aurelyn.Application.Services
     public interface IUserService
     {
         Task<AuthenticateResultResponse> AuthenticateAsync(string email, string tenantCode);
-        Task<LoginFailureResponse>   UpdateLoginFailureAsync(int userId);
+        Task<LoginFailureResponse> UpdateLoginFailureAsync(int userId);
         Task<bool> UpdateLoginSuccessAsync(int userId, bool markEmailVerified);
         Task<UserResponse> GetByIdAsync(int userId, int tenantId);
         bool VerifyPassword(string password, string passwordHash);
         string HashPassword(string password);
         bool IsPasswordStrong(string password);
-        Task<int> ChangePasswordAsync(int userId, int tenantId, string currentPassword, string newPassword, long? currentSessionId);
-        Task<long> CreateOtpAsync(int tenantId, int userId, string purpose, string clientApp, string codeHash, DateTime expiresAt, string ipAddress);
+        Task<GenericSaveResponse> ChangePasswordAsync(ResetPassword resetPassword);
+        Task<OtpResponse> CreateOtpAsync(OtpCode otpCode);
         Task<OtpResponse> GetOtpByIdAsync(long otpId);
         Task<OtpResponse> GetLatestOtpAsync(int userId, string purpose);
         Task<int> CountOtpSinceAsync(int userId, string purpose, DateTime since);
         Task<int> IncrementOtpAttemptsAsync(long otpId);
         Task<bool> MarkOtpUsedAsync(long otpId);
-        Task<long> CreateSessionAsync(int userId, string refreshTokenHash, DateTime expiresAt, string deviceInfo, string ipAddress);
+        Task<UserSessionResponse> CreateSessionAsync(UserSession userSession);
         Task<UserSessionResponse> GetSessionByHashAsync(string refreshTokenHash);
-        Task<long> RotateSessionAsync(long sessionId, string newRefreshTokenHash, DateTime newExpiresAt, string deviceInfo, string ipAddress);
+        Task<RotateSessionResponse> RotateSessionAsync(RotateSession rotateSession);
         Task<bool> RevokeSessionAsync(int userId, string refreshTokenHash);
         Task<int> RevokeAllSessionsAsync(int userId, long? exceptSessionId);
         Task InsertAuditLogAsync(AuditLog auditLog);
-        Task<RegisterResultResponse> RegisterAsync(Register model);
+        Task<GenericSaveResponse> RegisterAsync(Register model);
         Task<UserLookupResponse> GetByEmailAsync(string email, string? tenantCode);
-        Task<bool> ResetPasswordAsync(int userId, int tenantId, string newPassword);
+        Task<GenericSaveResponse> ResetPasswordAsync(ResetPassword resetPassword);
+        Task<bool> IsSameAsCurrentPasswordAsync(int userId, int tenantId, string password);
     }
     #endregion
 
@@ -152,47 +155,28 @@ namespace Aurelyn.Application.Services
         }
         #endregion
 
-        #region ChangePasswordAsync
-        public async Task<int> ChangePasswordAsync(int userId, int tenantId, string currentPassword, string newPassword, long? currentSessionId)
+        public async Task<GenericSaveResponse> ChangePasswordAsync(ResetPassword resetPassword)
         {
-            var currentHash = await _userRepository.GetPasswordHash(userId, tenantId);
-            if (string.IsNullOrEmpty(currentHash))
-            {
-                return 1;
-            }
+            var currentHash = await _userRepository.GetPasswordHash(resetPassword.UserId, resetPassword.TenantId);
+            if (string.IsNullOrEmpty(currentHash)) return new GenericSaveResponse { ReturnValue = 1 };
+            if (!VerifyPassword(resetPassword.CurrentPassword, currentHash)) return new GenericSaveResponse { ReturnValue = 2 };
+            if (!IsPasswordStrong(resetPassword.NewPassword)) return new GenericSaveResponse { ReturnValue = 3 };
+            if (VerifyPassword(resetPassword.NewPassword, currentHash)) return new GenericSaveResponse { ReturnValue = 4 };
 
-            if (!VerifyPassword(currentPassword, currentHash))
-            {
-                return 2;
-            }
+            resetPassword.NewPasswordHash = HashPassword(resetPassword.NewPassword);
+            var changed = await _userRepository.ChangePassword(resetPassword);
+            if (changed.ReturnValue != 0) return new GenericSaveResponse { ReturnValue = 1 };
 
-            if (!IsPasswordStrong(newPassword))
-            {
-                return 3;
-            }
-
-            if (VerifyPassword(newPassword, currentHash))
-            {
-                return 4;
-            }
-
-            var newHash = HashPassword(newPassword);
-            var changed = await _userRepository.ChangePassword(userId, tenantId, newHash);
-            if (!changed)
-            {
-                return 1;
-            }
-
-            // every other device has to sign in again
-            await _userRepository.RevokeAllSessions(userId, currentSessionId);
-            return 0;
+            await _userRepository.RevokeAllSessions(resetPassword.UserId, resetPassword.CurrentSessionId);
+            return new GenericSaveResponse { ReturnValue = 0 };
         }
-        #endregion
 
         #region CreateOtpAsync
-        public async Task<long> CreateOtpAsync(int tenantId, int userId, string purpose, string clientApp, string codeHash, DateTime expiresAt, string ipAddress)
+        public async Task<OtpResponse> CreateOtpAsync(OtpCode otpCode)
         {
-            return await _userRepository.CreateOtp(tenantId, userId, purpose, clientApp, codeHash, expiresAt, ipAddress);
+            var request = await _userRepository.CreateOtp(otpCode);
+            var response = _mapper.Map<OtpCode, OtpResponse>(request);
+            return response;
         }
         #endregion
 
@@ -246,9 +230,11 @@ namespace Aurelyn.Application.Services
         #endregion
 
         #region CreateSessionAsync
-        public async Task<long> CreateSessionAsync(int userId, string refreshTokenHash, DateTime expiresAt, string deviceInfo, string ipAddress)
+        public async Task<UserSessionResponse> CreateSessionAsync(UserSession userSession)
         {
-            return await _userRepository.CreateSession(userId, refreshTokenHash, expiresAt, deviceInfo, ipAddress);
+            var request = await _userRepository.CreateSession(userSession);
+            var resposne = _mapper.Map<UserSession, UserSessionResponse>(request);
+            return resposne;
         }
         #endregion
 
@@ -262,9 +248,11 @@ namespace Aurelyn.Application.Services
         #endregion
 
         #region RotateSessionAsync
-        public async Task<long> RotateSessionAsync(long sessionId, string newRefreshTokenHash, DateTime newExpiresAt, string deviceInfo, string ipAddress)
+        public async Task<RotateSessionResponse> RotateSessionAsync(RotateSession rotateSession)
         {
-            return await _userRepository.RotateSession(sessionId, newRefreshTokenHash, newExpiresAt, deviceInfo, ipAddress);
+            var request = await _userRepository.RotateSession(rotateSession);
+            var response = _mapper.Map<RotateSession, RotateSessionResponse>(request);
+            return response;
         }
         #endregion
 
@@ -290,24 +278,22 @@ namespace Aurelyn.Application.Services
         #endregion
 
         #region RegisterAsync
-        // ReturnValue: 0 = ok, 1 = tenant not found, 2 = already registered, 3 = default role missing
-        public async Task<RegisterResultResponse> RegisterAsync(Register model)
+        public async Task<GenericSaveResponse> RegisterAsync(Register model)
         {
             var passwordHash = HashPassword(model.Password);
-            var result = await _userRepository.Register(
-                model.FirstName.Trim(),
-                model.LastName?.Trim(),
-                model.Email.Trim(),
-                passwordHash,
-                model.TenantCode);
-
-            var response = _mapper.Map<RegisterResult, RegisterResultResponse>(result);
+            model.FirstName.Trim();
+            model.LastName?.Trim();
+            model.Email.Trim();
+            model.PasswordHash = passwordHash;
+            model.TenantCode = string.IsNullOrWhiteSpace(model.TenantCode) ? null : model.TenantCode.Trim();
+            model.RoleCode = "PATIENT";
+            var result = await _userRepository.Register(model);
+            var response = _mapper.Map<SaveResponse, GenericSaveResponse>(result);
             return response;
         }
         #endregion
 
         #region GetByEmailAsync
-        // ReturnValue: 0 = found, 1 = not found, 2 = inactive, 4 = no usable password yet
         public async Task<UserLookupResponse> GetByEmailAsync(string email, string? tenantCode)
         {
             var result = await _userRepository.GetByEmail(email, tenantCode);
@@ -317,20 +303,28 @@ namespace Aurelyn.Application.Services
         #endregion
 
         #region ResetPasswordAsync
-        // Used after the reset OTP was verified: no current password is needed.
-        // Saves the new hash, clears any lock, and signs the user out everywhere.
-        public async Task<bool> ResetPasswordAsync(int userId, int tenantId, string newPassword)
+        public async Task<GenericSaveResponse> ResetPasswordAsync(ResetPassword resetPassword)
         {
-            var newHash = HashPassword(newPassword);
-            var changed = await _userRepository.ChangePassword(userId, tenantId, newHash);
-            if (!changed)
-            {
-                return false;
-            }
+            if (!IsPasswordStrong(resetPassword.NewPassword))
+                return new GenericSaveResponse { ReturnValue = 3 };
 
-            await _userRepository.RevokeAllSessions(userId, null);
-            return true;
+            if (await IsSameAsCurrentPasswordAsync(resetPassword.UserId, resetPassword.TenantId, resetPassword.NewPassword))
+                return new GenericSaveResponse { ReturnValue = 4 };
+
+            resetPassword.NewPasswordHash = HashPassword(resetPassword.NewPassword);
+            var changed = await _userRepository.ChangePassword(resetPassword);
+            if (changed.ReturnValue != 0)
+                return new GenericSaveResponse { ReturnValue = 1 };
+
+            await _userRepository.RevokeAllSessions(resetPassword.UserId, null);
+            return new GenericSaveResponse { ReturnValue = 0 };
         }
         #endregion
+
+        public async Task<bool> IsSameAsCurrentPasswordAsync(int userId, int tenantId, string password)
+        {
+            var hash = await _userRepository.GetPasswordHash(userId, tenantId);
+            return !string.IsNullOrEmpty(hash) && VerifyPassword(password, hash);
+        }
     }
 }

@@ -1,4 +1,5 @@
-﻿using Aurelyn.Domain.Models.AuditLog;
+﻿using Aurelyn.Domain.Models;
+using Aurelyn.Domain.Models.AuditLog;
 using Aurelyn.Domain.Models.Authuntication;
 using Aurelyn.Domain.Models.User;
 using Aurelyn.Domain.Otp;
@@ -17,20 +18,20 @@ namespace Aurelyn.Application.Repositories
         Task<bool> UpdateLoginSuccess(int userId, bool markEmailVerified);
         Task<User> GetById(int userId, int tenantId);
         Task<string> GetPasswordHash(int userId, int tenantId);
-        Task<bool> ChangePassword(int userId, int tenantId, string passwordHash);
-        Task<long> CreateOtp(int tenantId, int userId, string purpose, string clientApp, string codeHash, DateTime expiresAt, string ipAddress);
+        Task<SaveResponse> ChangePassword(ResetPassword resetPassword);
+        Task<OtpCode> CreateOtp(OtpCode otpCode);
         Task<OtpCode> GetOtpById(long otpId);
         Task<OtpCode> GetLatestOtp(int userId, string purpose);
         Task<int> CountOtpSince(int userId, string purpose, DateTime since);
         Task<int> IncrementOtpAttempts(long otpId);
         Task<bool> MarkOtpUsed(long otpId);
-        Task<long> CreateSession(int userId, string refreshTokenHash, DateTime expiresAt, string deviceInfo, string ipAddress);
+        Task<UserSession> CreateSession(UserSession userSession);
         Task<UserSession> GetSessionByHash(string refreshTokenHash);
-        Task<long> RotateSession(long sessionId, string newRefreshTokenHash, DateTime newExpiresAt, string deviceInfo, string ipAddress);
+        Task<RotateSession> RotateSession(RotateSession rotateSession);
         Task<bool> RevokeSession(int userId, string refreshTokenHash);
         Task<int> RevokeAllSessions(int userId, long? exceptSessionId);
         Task InsertAuditLog(AuditLog auditLog);
-        Task<RegisterResult> Register(string firstName, string? lastName, string email, string passwordHash, string? tenantCode);
+        Task<SaveResponse> Register(Register register);
         Task<UserLookup> GetByEmail(string email, string? tenantCode);
     }
     #endregion
@@ -158,49 +159,47 @@ namespace Aurelyn.Application.Repositories
         #endregion
 
         #region ChangePassword
-        public async Task<bool> ChangePassword(int userId, int tenantId, string passwordHash)
+        public async Task<SaveResponse> ChangePassword(ResetPassword resetPassword)
         {
+            var data = new SaveResponse();
             using (var connection = CreateConnection())
             {
                 var parameters = new DynamicParameters();
-                parameters.Add("@UserId", userId);
-                parameters.Add("@TenantId", tenantId);
-                parameters.Add("@PasswordHash", passwordHash);
+                parameters.Add("@UserId", resetPassword.UserId);
+                parameters.Add("@TenantId", resetPassword.TenantId);
+                parameters.Add("@PasswordHash", resetPassword.NewPasswordHash);
                 parameters.Add("@ReturnValue", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
-
                 connection.Open();
                 await connection.ExecuteAsync("[dbo].[Users_ChangePassword]", parameters, commandType: CommandType.StoredProcedure);
-
-                return parameters.Get<int>("@ReturnValue") == 0;
+                data.ReturnValue = parameters.Get<int>("@ReturnValue");
             }
+            return data;
         }
         #endregion
 
         #region CreateOtp
-        public async Task<long> CreateOtp(int tenantId, int userId, string purpose, string clientApp, string codeHash, DateTime expiresAt, string ipAddress)
+        public async Task<OtpCode> CreateOtp(OtpCode otpCode)
         {
-            long data = 0;
+            var data = new OtpCode();
             using (var connection = CreateConnection())
             {
                 var parameters = new DynamicParameters();
-                parameters.Add("@TenantId", tenantId);
-                parameters.Add("@UserId", userId);
-                parameters.Add("@Purpose", purpose);
-                parameters.Add("@ClientApp", clientApp);
-                parameters.Add("@CodeHash", codeHash);
-                parameters.Add("@ExpiresAt", expiresAt, DbType.DateTime2);
-                parameters.Add("@IPAddress", ipAddress);
+                parameters.Add("@TenantId", otpCode.TenantId);
+                parameters.Add("@UserId", otpCode.UserId);
+                parameters.Add("@Purpose", otpCode.Purpose);
+                parameters.Add("@ClientApp", otpCode.ClientApp);
+                parameters.Add("@CodeHash", otpCode.CodeHash);
+                parameters.Add("@ExpiresAt", otpCode.ExpiresAt, DbType.DateTime2);
+                parameters.Add("@IPAddress", otpCode.IPAddress);
                 parameters.Add("@ReturnValue", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
 
                 connection.Open();
-                var result = await connection.QueryFirstOrDefaultAsync<long>("[dbo].[OtpCodes_Create]",
-                    parameters,
-                    commandType: CommandType.StoredProcedure);
+                var otpId = await connection.QueryFirstOrDefaultAsync<long>(
+                    "[dbo].[OtpCodes_Create]", parameters, commandType: CommandType.StoredProcedure);
 
-                if (parameters.Get<int>("@ReturnValue") == 0)
-                {
-                    data = result;
-                }
+                data.ReturnValue = parameters.Get<int>("@ReturnValue");
+                if (data.ReturnValue == 0)
+                    data.OtpId = otpId;
             }
             return data;
         }
@@ -317,25 +316,25 @@ namespace Aurelyn.Application.Repositories
         #endregion
 
         #region CreateSession
-        public async Task<long> CreateSession(int userId, string refreshTokenHash, DateTime expiresAt, string deviceInfo, string ipAddress)
+        public async Task<UserSession> CreateSession(UserSession userSession)
         {
-            long data = 0;
+            var data = new UserSession();
             using (var connection = CreateConnection())
             {
                 var parameters = new DynamicParameters();
-                parameters.Add("@UserId", userId);
-                parameters.Add("@RefreshTokenHash", refreshTokenHash);
-                parameters.Add("@ExpiresAt", expiresAt, DbType.DateTime2);
-                parameters.Add("@DeviceInfo", deviceInfo);
-                parameters.Add("@IPAddress", ipAddress);
+                parameters.Add("@UserId", userSession.UserId);
+                parameters.Add("@RefreshTokenHash", userSession.RefreshTokenHash);
+                parameters.Add("@ExpiresAt", userSession.ExpiresAt, DbType.DateTime2);
+                parameters.Add("@DeviceInfo", userSession.DeviceInfo);
+                parameters.Add("@IPAddress", userSession.IPAddress);
                 parameters.Add("@ReturnValue", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
 
                 connection.Open();
-                var result = await connection.QueryFirstOrDefaultAsync<long>("[dbo].[UserSessions_Create]",
+                var result = await connection.QueryFirstOrDefaultAsync<UserSession>("[dbo].[UserSessions_Create]",
                     parameters,
                     commandType: CommandType.StoredProcedure);
-
-                if (parameters.Get<int>("@ReturnValue") == 0)
+                data.ReturnValue = parameters.Get<int>("@ReturnValue");
+                if (data.ReturnValue == 0)
                 {
                     data = result;
                 }
@@ -370,25 +369,27 @@ namespace Aurelyn.Application.Repositories
         #endregion
 
         #region RotateSession
-        public async Task<long> RotateSession(long sessionId, string newRefreshTokenHash, DateTime newExpiresAt, string deviceInfo, string ipAddress)
+        public async Task<RotateSession> RotateSession(RotateSession rotateSession)
         {
-            long data = 0;
+            var data = new RotateSession();
             using (var connection = CreateConnection())
             {
                 var parameters = new DynamicParameters();
-                parameters.Add("@SessionId", sessionId);
-                parameters.Add("@NewRefreshTokenHash", newRefreshTokenHash);
-                parameters.Add("@NewExpiresAt", newExpiresAt, DbType.DateTime2);
-                parameters.Add("@DeviceInfo", deviceInfo);
-                parameters.Add("@IPAddress", ipAddress);
+                parameters.Add("@SessionId", rotateSession.SessionId);
+                parameters.Add("@NewRefreshTokenHash", rotateSession.NewRefreshTokenHash);
+                parameters.Add("@NewExpiresAt", rotateSession.NewExpiresAt, DbType.DateTime2);
+                parameters.Add("@DeviceInfo", rotateSession.DeviceInfo);
+                parameters.Add("@IPAddress", rotateSession.IpAddress);
                 parameters.Add("@ReturnValue", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
 
                 connection.Open();
-                var result = await connection.QueryFirstOrDefaultAsync<long>("[dbo].[UserSessions_Rotate]",
+                var result = await connection.QueryFirstOrDefaultAsync<RotateSession>("[dbo].[UserSessions_Rotate]",
                     parameters,
                     commandType: CommandType.StoredProcedure);
 
-                if (parameters.Get<int>("@ReturnValue") == 0)
+                data.ReturnValue = parameters.Get<int>("@ReturnValue");
+
+                if (data.ReturnValue == 0)
                 {
                     data = result;
                 }
@@ -458,29 +459,35 @@ namespace Aurelyn.Application.Repositories
         #endregion
 
         #region Register
-        public async Task<RegisterResult> Register(string firstName, string? lastName, string email, string passwordHash, string? tenantCode)
+        public async Task<SaveResponse> Register(Register register)
         {
-            var data = new RegisterResult();
+            var data = new SaveResponse();
             using (var connection = CreateConnection())
             {
                 var parameters = new DynamicParameters();
-                parameters.Add("@TenantCode", tenantCode);
-                parameters.Add("@FirstName", firstName);
-                parameters.Add("@LastName", lastName);
-                parameters.Add("@Email", email);
-                parameters.Add("@PasswordHash", passwordHash);
+                parameters.Add("@TenantCode", register.TenantCode);
+                parameters.Add("@FirstName", register.FirstName);
+                parameters.Add("@LastName", register.LastName);
+                parameters.Add("@Email", register.Email);
+                parameters.Add("@PasswordHash", register.PasswordHash);
+                parameters.Add("@RoleCode", register.RoleCode);
+
+                parameters.Add("@NewUserId", dbType: DbType.Int32, direction: ParameterDirection.Output);
+                parameters.Add("@NewTenantId", dbType: DbType.Int32, direction: ParameterDirection.Output);
                 parameters.Add("@ReturnValue", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
 
                 connection.Open();
-                var result = await connection.QueryFirstOrDefaultAsync<RegisterResult>("[dbo].[Users_Register]",
+                await connection.ExecuteAsync("[dbo].[Users_Register]",
                     parameters,
                     commandType: CommandType.StoredProcedure);
 
-                if (result != null)
-                {
-                    data = result;
-                }
                 data.ReturnValue = parameters.Get<int>("@ReturnValue");
+
+                if (data.ReturnValue == 0 || data.ReturnValue == 4)
+                {
+                    data.UserId = parameters.Get<int>("@NewUserId");
+                    data.TenantId = parameters.Get<int>("@NewTenantId");
+                }
             }
             return data;
         }

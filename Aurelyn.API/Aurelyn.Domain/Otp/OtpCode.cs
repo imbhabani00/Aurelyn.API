@@ -13,6 +13,7 @@
         public DateTime? UsedAt { get; set; }
         public string? IPAddress { get; set; }
         public DateTime CreatedDate { get; set; }
+        public int? ReturnValue { get; set; }
     }
     public class VerifyOtpModel
     {
@@ -23,6 +24,7 @@
     public class ResendOtpModel
     {
         public long OtpId { get; set; }
+        public string ClientApp { get; set; } = string.Empty;
     }
 
 }

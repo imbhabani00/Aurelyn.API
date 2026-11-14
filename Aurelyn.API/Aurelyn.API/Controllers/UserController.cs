@@ -96,9 +96,18 @@ namespace Aurelyn.API.Controllers
 
                 // the current session stays signed in, every other session is revoked
                 long? currentSessionId = CurrentSessionId;
-                var result = await _userService.ChangePasswordAsync(userId, tenantId, model.CurrentPassword, model.NewPassword, currentSessionId);
 
-                switch (result)
+                var resetPasswordDetails = new ResetPassword()
+                {
+                    UserId = userId,
+                    TenantId = tenantId,
+                    CurrentPassword = model.CurrentPassword,
+                    NewPassword = model.NewPassword,
+                    CurrentSessionId = model.CurrentSessionId
+                };
+                var result = await _userService.ChangePasswordAsync(resetPasswordDetails);
+
+                switch (result.ReturnValue)
                 {
                     case 0:
                         await WriteAuditAsync(tenantId, userId, "UPDATE", "tbl_Users", userId.ToString(), "Password changed, other sessions revoked");

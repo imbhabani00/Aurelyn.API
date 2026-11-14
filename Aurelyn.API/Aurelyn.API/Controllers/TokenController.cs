@@ -7,6 +7,7 @@ using Aurelyn.Domain.Constants;
 using Aurelyn.Domain.Models.AuditLog;
 using Aurelyn.Domain.Models.Authuntication;
 using Aurelyn.Domain.Otp;
+using Aurelyn.Domain.Session;
 using Aurelyn.Domain.Settings;
 using Aurelyn.Domain.Token;
 using Microsoft.AspNetCore.Authorization;
@@ -114,24 +115,33 @@ namespace Aurelyn.API.Controllers
 
                 // create and send the OTP
                 var code = _tokenService.GenerateOtp();
-                var codeHash = _tokenService.HashOtp(user.UserId, OtpPurposeConstant.Login, code);
-                var expiresAt = DateTime.UtcNow.AddMinutes(_otpSettings.ExpiryMinutes);
 
-                var otpId = await _userService.CreateOtpAsync(user.TenantId, user.UserId, OtpPurposeConstant.Login, clientApp, codeHash, expiresAt, GetIpAddress());
-                if (otpId <= 0)
+                var otpModel = new OtpCode
+                {
+                    TenantId = user.TenantId,
+                    UserId = user.UserId,
+                    Purpose = OtpPurposeConstant.Login,
+                    ClientApp = clientApp,
+                    CodeHash = _tokenService.HashOtp(user.UserId, OtpPurposeConstant.Login, code),
+                    ExpiresAt = DateTime.UtcNow.AddMinutes(_otpSettings.ExpiryMinutes),
+                    IPAddress = GetIpAddress()
+                };
+
+                var otpResult = await _userService.CreateOtpAsync(otpModel);
+                if (otpResult.ReturnValue != 0 || otpResult.OtpId <= 0)
                 {
                     apiResponse = CreateFailedApiResponse("", HttpStatusCode.InternalServerError, "Unable to generate OTP.");
                     return new ObjectResult(apiResponse);
                 }
 
                 await _otpService.SendOtpAsync(user.Email, code, OtpPurposeConstant.Login, _otpSettings.ExpiryMinutes);
-                await WriteAuditAsync(user.TenantId, user.UserId, "LOGIN", "tbl_OtpCodes", otpId.ToString(), "Password verified, OTP sent");
+                await WriteAuditAsync(user.TenantId, user.UserId, "LOGIN", "tbl_OtpCodes", otpResult.OtpId.ToString(), "Password verified, OTP sent");
 
                 _logger.LogInformation("AccessToken: OTP sent - UserId: {UserId}", user.UserId);
 
                 apiResponse = CreateSuccessResponse(new
                 {
-                    OtpId = otpId,
+                    OtpId = otpResult.OtpId,
                     Email = MaskEmail(user.Email),
                     ExpiresInSeconds = _otpSettings.ExpiryMinutes * 60
                 });
@@ -225,16 +235,24 @@ namespace Aurelyn.API.Controllers
                 var refreshTokenHash = _tokenService.HashToken(refreshToken);
                 var refreshTokenExpiry = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpiryDays);
 
-                var sessionId = await _userService.CreateSessionAsync(user.UserId, refreshTokenHash, refreshTokenExpiry, GetUserAgent(), GetIpAddress());
-                if (sessionId <= 0)
+                var sessionResponse = await _userService.CreateSessionAsync(new UserSession
+                {
+                    UserId = user.UserId,
+                    RefreshTokenHash = refreshTokenHash,
+                    ExpiresAt = refreshTokenExpiry,
+                    DeviceInfo = GetUserAgent(),
+                    IPAddress = GetIpAddress()
+                });
+
+                if (sessionResponse == null || sessionResponse.SessionId <= 0)
                 {
                     apiResponse = CreateFailedApiResponse("", HttpStatusCode.InternalServerError, "Unable to create session.");
                     return new ObjectResult(apiResponse);
                 }
 
-                var accessToken = _tokenService.GenerateAccessToken(BuildClaims(user, otp.ClientApp, sessionId));
+                var accessToken = _tokenService.GenerateAccessToken(BuildClaims(user, otp.ClientApp, sessionResponse.SessionId));
 
-                await WriteAuditAsync(user.TenantId, user.UserId, "LOGIN", "tbl_UserSessions", sessionId.ToString(), "Login successful");
+                await WriteAuditAsync(user.TenantId, user.UserId, "LOGIN", "tbl_UserSessions", sessionResponse.SessionId.ToString(), "Login successful");
 
                 _logger.LogInformation("VerifyOtp: User authenticated successfully - UserId: {UserId}", user.UserId);
 
@@ -244,6 +262,7 @@ namespace Aurelyn.API.Controllers
                     RefreshToken = refreshToken,
                     ExpiresInSeconds = _jwtSettings.AccessTokenExpiryMinutes * 60,
                     UserId = user.UserId,
+                    TenantId = user.TenantId,
                     RoleCode = user.RoleCode,
                     RoleName = user.RoleName,
                     RoleId = user.RoleId,
@@ -311,7 +330,7 @@ namespace Aurelyn.API.Controllers
                     apiResponse = CreateFailedApiResponse("", HttpStatusCode.TooManyRequests, "OTP limit reached. Please try again later.");
                     return new ObjectResult(apiResponse);
                 }
-
+                var clientApp = string.IsNullOrWhiteSpace(model.ClientApp) ? "Web" : model.ClientApp.Trim();
                 var user = await _userService.GetByIdAsync(otp.UserId, otp.TenantId);
                 if (user == null)
                 {
@@ -320,11 +339,19 @@ namespace Aurelyn.API.Controllers
                 }
 
                 var code = _tokenService.GenerateOtp();
-                var codeHash = _tokenService.HashOtp(user.UserId, otp.Purpose, code);
-                var expiresAt = DateTime.UtcNow.AddMinutes(_otpSettings.ExpiryMinutes);
+                var otpModel = new OtpCode
+                {
+                    TenantId = user.TenantId,
+                    UserId = user.UserId,
+                    Purpose = OtpPurposeConstant.ResendOtp,
+                    ClientApp = clientApp,
+                    CodeHash = _tokenService.HashOtp(user.UserId, OtpPurposeConstant.ResendOtp, code),
+                    ExpiresAt = DateTime.UtcNow.AddMinutes(_otpSettings.ExpiryMinutes),
+                    IPAddress = GetIpAddress()
+                };
 
-                var newOtpId = await _userService.CreateOtpAsync(user.TenantId, user.UserId, otp.Purpose, otp.ClientApp, codeHash, expiresAt, GetIpAddress());
-                if (newOtpId <= 0)
+                var newOtpResult = await _userService.CreateOtpAsync(otpModel);
+                if (newOtpResult.OtpId <= 0)
                 {
                     apiResponse = CreateFailedApiResponse("", HttpStatusCode.InternalServerError, "Unable to generate OTP.");
                     return new ObjectResult(apiResponse);
@@ -336,7 +363,7 @@ namespace Aurelyn.API.Controllers
 
                 apiResponse = CreateSuccessResponse(new
                 {
-                    OtpId = newOtpId,
+                    OtpId = newOtpResult.OtpId,
                     Email = MaskEmail(user.Email),
                     ExpiresInSeconds = _otpSettings.ExpiryMinutes * 60
                 });
@@ -416,15 +443,24 @@ namespace Aurelyn.API.Controllers
                 var newRefreshTokenHash = _tokenService.HashToken(newRefreshToken);
                 var refreshTokenExpiry = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpiryDays);
 
-                var newSessionId = await _userService.RotateSessionAsync(session.SessionId, newRefreshTokenHash, refreshTokenExpiry, GetUserAgent(), GetIpAddress());
-                if (newSessionId <= 0)
+                var newSession = new RotateSession
+                {
+                    SessionId = session.SessionId,
+                    NewRefreshTokenHash = newRefreshTokenHash,
+                    NewExpiresAt = refreshTokenExpiry,
+                    DeviceInfo = GetUserAgent(),
+                    IpAddress = GetIpAddress()
+                };
+
+                var rotateSessionResponse = await _userService.RotateSessionAsync(newSession);
+                if (rotateSessionResponse.SessionId <= 0)
                 {
                     apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized, "Session is no longer valid. Please sign in again.");
                     return new ObjectResult(apiResponse);
                 }
 
                 // claims are rebuilt from the database so role changes apply on refresh
-                var newAccessToken = _tokenService.GenerateAccessToken(BuildClaims(user, clientApp, newSessionId));
+                var newAccessToken = _tokenService.GenerateAccessToken(BuildClaims(user, clientApp, rotateSessionResponse.SessionId));
 
                 apiResponse = CreateSuccessResponse(new
                 {
@@ -583,24 +619,61 @@ namespace Aurelyn.API.Controllers
                 switch (result.ReturnValue)
                 {
                     case 0:
+                        apiResponse = CreateSuccessResponse("", HttpStatusCode.OK, "Hey, you have registered successfully.");
                         break;
+
                     case 1:
-                        apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest, "Organization not found.");
+                        apiResponse = CreateFailedApiResponse(
+                            "", HttpStatusCode.BadRequest, "Organization not found.");
                         return new ObjectResult(apiResponse);
+
                     case 2:
-                        apiResponse = CreateFailedApiResponse("", HttpStatusCode.Conflict, "An account with this email already exists.");
+                        apiResponse = CreateFailedApiResponse(
+                            "", HttpStatusCode.Conflict, "An account with this email already exists.");
                         return new ObjectResult(apiResponse);
+
+                    case 3:
+                        apiResponse = CreateFailedApiResponse(
+                            "", HttpStatusCode.BadRequest, "Registration role not found.");
+                        return new ObjectResult(apiResponse);
+
+                    case 4:
+                        apiResponse = CreateSuccessResponse("", HttpStatusCode.OK, "Verification is pending. We are sending a new code.");
+                        break;
+
                     default:
-                        apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest, "Registration is not available right now.");
+                        apiResponse = CreateFailedApiResponse(
+                            "", HttpStatusCode.BadRequest, "Registration is not available right now.");
                         return new ObjectResult(apiResponse);
                 }
 
-                var code = _tokenService.GenerateOtp();
-                var codeHash = _tokenService.HashOtp(result.UserId, OtpPurposeConstant.Register, code);
-                var expiresAt = DateTime.UtcNow.AddMinutes(_otpSettings.ExpiryMinutes);
+                if (result.ReturnValue == 4)
+                {
+                    var latest = await _userService.GetLatestOtpAsync(result.UserId, OtpPurposeConstant.Register);
+                    if (latest != null && latest.CreatedDate.AddSeconds(_otpSettings.ResendCooldownSeconds) > DateTime.UtcNow)
+                        return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.TooManyRequests,
+                            "Please wait before requesting a new code."));
 
-                var otpId = await _userService.CreateOtpAsync(result.TenantId, result.UserId, OtpPurposeConstant.Register, clientApp, codeHash, expiresAt, GetIpAddress());
-                if (otpId <= 0)
+                    var sentCount = await _userService.CountOtpSinceAsync(
+                        result.UserId, OtpPurposeConstant.Register, DateTime.UtcNow.AddHours(-1));
+                    if (sentCount >= _otpSettings.MaxResendsPerHour)
+                        return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.TooManyRequests,
+                            "OTP limit reached. Please try again later."));
+                }
+
+                var code = _tokenService.GenerateOtp();
+                var otpModel = new OtpCode
+                {
+                    TenantId = result.TenantId,
+                    UserId = result.UserId,
+                    Purpose = OtpPurposeConstant.Register,
+                    ClientApp = clientApp,
+                    CodeHash = _tokenService.HashOtp(result.UserId, OtpPurposeConstant.Register, code),
+                    ExpiresAt = DateTime.UtcNow.AddMinutes(_otpSettings.ExpiryMinutes),
+                    IPAddress = GetIpAddress()
+                };
+                var otpResult = await _userService.CreateOtpAsync(otpModel);
+                if (otpResult.ReturnValue != 0 || otpResult.OtpId <= 0)
                 {
                     apiResponse = CreateFailedApiResponse("", HttpStatusCode.InternalServerError, "Unable to generate OTP.");
                     return new ObjectResult(apiResponse);
@@ -613,7 +686,7 @@ namespace Aurelyn.API.Controllers
 
                 apiResponse = CreateSuccessResponse(new
                 {
-                    OtpId = otpId,
+                    OtpId = otpResult.OtpId,
                     Email = MaskEmail(model.Email),
                     ExpiresInSeconds = _otpSettings.ExpiryMinutes * 60
                 });
@@ -629,50 +702,99 @@ namespace Aurelyn.API.Controllers
         #endregion
 
         #region Forgot Password
-        // Always answers the same way, so nobody can use it to find out which emails are registered.
         [HttpPost("forgot-password")]
         [AllowAnonymous]
         public async Task<IActionResult> ForgotPassword([FromBody] ForgotPassword model)
         {
-            var apiResponse = new ApiResponse();
-            const string genericMessage = "If an account exists for this email, a verification code has been sent.";
+            ApiResponse apiResponse;
             try
             {
+                var clientApp = string.IsNullOrWhiteSpace(model.ClientApp) ? "Web" : model.ClientApp.Trim();
                 var user = await _userService.GetByEmailAsync(model.Email.Trim(), model.TenantCode);
 
-                if (user != null && user.ReturnValue == 0)
+                var returnValue = (user == null || user.UserId <= 0 && user.ReturnValue == 0) ? 1 : user.ReturnValue;
+
+                switch (returnValue)
                 {
-                    // same cooldown and hourly limit as resend-otp, applied silently
-                    var latest = await _userService.GetLatestOtpAsync(user.UserId, OtpPurposeConstant.PasswordReset);
-                    var coolingDown = latest != null
-                        && latest.CreatedDate.AddSeconds(_otpSettings.ResendCooldownSeconds) > DateTime.UtcNow;
-                    var sentCount = await _userService.CountOtpSinceAsync(user.UserId, OtpPurposeConstant.PasswordReset, DateTime.UtcNow.AddHours(-1));
-
-                    if (!coolingDown && sentCount < _otpSettings.MaxResendsPerHour)
-                    {
-                        var code = _tokenService.GenerateOtp();
-                        var codeHash = _tokenService.HashOtp(user.UserId, OtpPurposeConstant.PasswordReset, code);
-                        var expiresAt = DateTime.UtcNow.AddMinutes(_otpSettings.ExpiryMinutes);
-
-                        var otpId = await _userService.CreateOtpAsync(user.TenantId, user.UserId, OtpPurposeConstant.PasswordReset, "Web", codeHash, expiresAt, GetIpAddress());
-                        if (otpId > 0)
+                    case 0:
+                        var error = await SendPasswordResetOtpAsync(user!, clientApp);
+                        if (error != null)
                         {
-                            await _otpService.SendOtpAsync(user.Email, code, OtpPurposeConstant.PasswordReset, _otpSettings.ExpiryMinutes);
-                            await WriteAuditAsync(user.TenantId, user.UserId, "OTHER", "tbl_OtpCodes", otpId.ToString(), "Password reset code sent");
+                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.TooManyRequests, error);
+                            break;
                         }
-                    }
+                        apiResponse = CreateSuccessResponse(new { }, HttpStatusCode.OK,
+                            "A verification code has been sent to your email.");
+                        break;
+
+                    case 1:
+                        apiResponse = CreateFailedApiResponse("", HttpStatusCode.NotFound,
+                            "No account found with this email.");
+                        break;
+
+                    case 2:
+                        apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized,
+                            "Your account is inactive. Please contact support.");
+                        break;
+
+                    case 4:
+                        apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                            "Your account is not verified yet. Please complete email verification first.");
+                        break;
+
+                    default:
+                        _logger.LogWarning("ForgotPassword: Unexpected return value {Value}", returnValue);
+                        apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                            "Unable to send the code right now.");
+                        break;
                 }
 
-                apiResponse = CreateSuccessResponse(new { }, HttpStatusCode.OK, genericMessage);
                 return new ObjectResult(apiResponse);
             }
             catch (Exception ex)
             {
-                // still the generic answer, so a failure does not reveal anything either
                 _logger.LogError(ex, "ForgotPassword: Error occurred");
-                apiResponse = CreateSuccessResponse(new { }, HttpStatusCode.OK, genericMessage);
+                apiResponse = CreateFailedApiResponse("", HttpStatusCode.InternalServerError,
+                    "An error occurred while processing your request");
                 return new ObjectResult(apiResponse);
             }
+        }
+
+        // returns null when the code was sent, otherwise the message to show
+        private async Task<string?> SendPasswordResetOtpAsync(UserLookupResponse user, string clientApp)
+        {
+            var latest = await _userService.GetLatestOtpAsync(user.UserId, OtpPurposeConstant.PasswordReset);
+            if (latest != null)
+            {
+                var wait = (int)Math.Ceiling((latest.CreatedDate.AddSeconds(_otpSettings.ResendCooldownSeconds) - DateTime.UtcNow).TotalSeconds);
+                if (wait > 0)
+                    return $"Please wait {wait} second(s) before requesting a new code.";
+            }
+
+            var sentCount = await _userService.CountOtpSinceAsync(
+                user.UserId, OtpPurposeConstant.PasswordReset, DateTime.UtcNow.AddHours(-1));
+            if (sentCount >= _otpSettings.MaxResendsPerHour)
+                return "Code limit reached. Please try again later.";
+
+            var code = _tokenService.GenerateOtp();
+            var otpModel = new OtpCode
+            {
+                TenantId = user.TenantId,
+                UserId = user.UserId,
+                Purpose = OtpPurposeConstant.PasswordReset,
+                ClientApp = clientApp,
+                CodeHash = _tokenService.HashOtp(user.UserId, OtpPurposeConstant.PasswordReset, code),
+                ExpiresAt = DateTime.UtcNow.AddMinutes(_otpSettings.ExpiryMinutes),
+                IPAddress = GetIpAddress()
+            };
+
+            var otpResult = await _userService.CreateOtpAsync(otpModel);
+            if (otpResult.ReturnValue != 0 || otpResult.OtpId <= 0)
+                return "Unable to generate the code. Please try again.";
+
+            await _otpService.SendOtpAsync(user.Email, code, OtpPurposeConstant.PasswordReset, _otpSettings.ExpiryMinutes);
+            await WriteAuditAsync(user.TenantId, user.UserId, "OTHER", "tbl_OtpCodes", otpResult.OtpId.ToString(), "Password reset code sent");
+            return null;
         }
         #endregion
 
@@ -681,65 +803,168 @@ namespace Aurelyn.API.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> ResetPassword([FromBody] ResetPassword model)
         {
-            var apiResponse = new ApiResponse();
-            const string invalidMessage = "Invalid or expired code.";
+            ApiResponse apiResponse;
             try
             {
+                if (model == null || string.IsNullOrWhiteSpace(model.Email) ||
+                    string.IsNullOrWhiteSpace(model.Code) || string.IsNullOrWhiteSpace(model.NewPassword))
+                {
+                    return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                        "Email, code and new password are required."));
+                }
+
+                if (model.NewPassword != model.ConfirmPassword)
+                {
+                    return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                        "Password and confirm password do not match."));
+                }
+
+                // ---------- 1. user lookup (Users_GetByEmail return value) ----------
                 var user = await _userService.GetByEmailAsync(model.Email.Trim(), model.TenantCode);
-                if (user == null || user.ReturnValue != 0)
+
+                // SP exits without a row for 1, 2 and 4, so user can be null or empty
+                var lookupValue = (user == null || (user.UserId <= 0 && user.ReturnValue == 0)) ? 1 : user.ReturnValue;
+
+                switch (lookupValue)
                 {
-                    apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest, invalidMessage);
-                    return new ObjectResult(apiResponse);
+                    case 0:
+                        break;
+
+                    case 1:
+                        return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.NotFound,
+                            "No account found with this email."));
+
+                    case 2:
+                        return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.Unauthorized,
+                            "Your account is inactive. Please contact support."));
+
+                    case 4:
+                        return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                            "Your account is not verified yet. Please complete email verification first."));
+
+                    default:
+                        _logger.LogWarning("ResetPassword: Unexpected lookup value {Value}", lookupValue);
+                        return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                            "Unable to reset the password right now."));
                 }
 
-                var otp = await _userService.GetLatestOtpAsync(user.UserId, OtpPurposeConstant.PasswordReset);
-                if (otp == null || otp.UsedAt != null || otp.ExpiresAt <= DateTime.UtcNow)
+                // ---------- 2. OTP state ----------
+                // 0 = valid code, 1 = no OTP, 2 = used, 3 = expired, 4 = too many attempts, 5 = wrong code
+                var otp = await _userService.GetLatestOtpAsync(user!.UserId, OtpPurposeConstant.PasswordReset);
+
+                var otpState =
+                    otp == null ? 1 :
+                    otp.UsedAt != null ? 2 :
+                    otp.ExpiresAt <= DateTime.UtcNow ? 3 :
+                    otp.Attempts >= _otpSettings.MaxAttempts ? 4 :
+                    !_tokenService.VerifyOtp(user.UserId, OtpPurposeConstant.PasswordReset, model.Code.Trim(), otp.CodeHash) ? 5 :
+                    0;
+
+                switch (otpState)
                 {
-                    apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest, invalidMessage);
-                    return new ObjectResult(apiResponse);
+                    case 0:
+                        break;
+
+                    case 1:
+                        return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.NotFound,
+                            "No code was requested for this email. Please request a new one."));
+
+                    case 2:
+                        return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                            "This code has already been used. Please request a new one."));
+
+                    case 3:
+                        return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                            "This code has expired. Please request a new one."));
+
+                    case 4:
+                        return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.TooManyRequests,
+                            "Too many invalid attempts. Please request a new code."));
+
+                    case 5:
+                        var attempts = await _userService.IncrementOtpAttemptsAsync(otp!.OtpId);
+                        var remaining = Math.Max(_otpSettings.MaxAttempts - attempts, 0);
+
+                        await WriteAuditAsync(user.TenantId, user.UserId, "OTHER", "tbl_OtpCodes",
+                            otp.OtpId.ToString(), "Password reset failed: invalid code");
+
+                        _logger.LogWarning("ResetPassword: Invalid code - UserId: {UserId}", user.UserId);
+
+                        return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                            remaining > 0
+                                ? $"Invalid code. {remaining} attempt(s) remaining."
+                                : "Too many invalid attempts. Please request a new code."));
+
+                    default:
+                        return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                            "Invalid or expired code."));
                 }
 
-                if (otp.Attempts >= _otpSettings.MaxAttempts)
+                // ---------- 3. password strength BEFORE burning the code ----------
+                if (!_userService.IsPasswordStrong(model.NewPassword))
                 {
-                    apiResponse = CreateFailedApiResponse("", HttpStatusCode.TooManyRequests, "Too many invalid attempts. Please request a new code.");
-                    return new ObjectResult(apiResponse);
+                    return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                        "Password must be 8-72 characters with upper, lower, number and special character."));
                 }
 
-                if (!_tokenService.VerifyOtp(user.UserId, OtpPurposeConstant.PasswordReset, model.Code.Trim(), otp.CodeHash))
+                if (await _userService.IsSameAsCurrentPasswordAsync(user.UserId, user.TenantId, model.NewPassword))
                 {
-                    await _userService.IncrementOtpAttemptsAsync(otp.OtpId);
-                    await WriteAuditAsync(user.TenantId, user.UserId, "OTHER", "tbl_OtpCodes", otp.OtpId.ToString(), "Password reset failed: invalid code");
-
-                    // same message as every other failure, so the reply reveals nothing
-                    apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest, invalidMessage);
-                    return new ObjectResult(apiResponse);
+                    return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                        "New password must be different from your current password."));
                 }
 
-                // one-time use
-                if (!await _userService.MarkOtpUsedAsync(otp.OtpId))
+                // ---------- 4. one-time use ----------
+                if (!await _userService.MarkOtpUsedAsync(otp!.OtpId))
                 {
-                    apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest, invalidMessage);
-                    return new ObjectResult(apiResponse);
+                    return new ObjectResult(CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                        "This code is no longer valid. Please request a new one."));
                 }
 
-                var changed = await _userService.ResetPasswordAsync(user.UserId, user.TenantId, model.NewPassword);
-                if (!changed)
+                // ---------- 5. update the password ----------
+                var resetResult = await _userService.ResetPasswordAsync(new ResetPassword
                 {
-                    apiResponse = CreateFailedApiResponse("", HttpStatusCode.InternalServerError, "Unable to reset the password.");
-                    return new ObjectResult(apiResponse);
+                    UserId = user.UserId,
+                    TenantId = user.TenantId,
+                    NewPassword = model.NewPassword
+                });
+
+                switch (resetResult.ReturnValue)
+                {
+                    case 0:
+                        await WriteAuditAsync(user.TenantId, user.UserId, "UPDATE", "tbl_Users",
+                            user.UserId.ToString(), "Password reset via OTP, all sessions revoked");
+
+                        _logger.LogInformation("ResetPassword: Password reset - UserId: {UserId}", user.UserId);
+
+                        apiResponse = CreateSuccessResponse(new { Message = "Password reset successfully." },
+                            HttpStatusCode.OK, "Password reset successfully.");
+                        break;
+
+                    case 3:
+                        apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                            "Password must be 8-72 characters with upper, lower, number and special character.");
+                        break;
+
+                    case 4:
+                        apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest,
+                            "New password must be different from your current password.");
+                        break;
+
+                    default:
+                        _logger.LogError("ResetPassword: Update failed - UserId: {UserId}, Value: {Value}",
+                            user.UserId, resetResult.ReturnValue);
+                        apiResponse = CreateFailedApiResponse("", HttpStatusCode.InternalServerError,
+                            "Unable to reset the password.");
+                        break;
                 }
 
-                await WriteAuditAsync(user.TenantId, user.UserId, "UPDATE", "tbl_Users", user.UserId.ToString(), "Password reset via OTP, all sessions revoked");
-
-                _logger.LogInformation("ResetPassword: Password reset - UserId: {UserId}", user.UserId);
-
-                apiResponse = CreateSuccessResponse(new { Message = "Password reset successfully." });
                 return new ObjectResult(apiResponse);
             }
             catch (Exception ex)
             {
-                apiResponse = CreateFailedApiResponse("", HttpStatusCode.InternalServerError, "An error occurred while processing your request");
                 _logger.LogError(ex, "ResetPassword: Error occurred");
+                apiResponse = CreateFailedApiResponse("", HttpStatusCode.InternalServerError,
+                    "An error occurred while processing your request");
                 return new ObjectResult(apiResponse);
             }
         }

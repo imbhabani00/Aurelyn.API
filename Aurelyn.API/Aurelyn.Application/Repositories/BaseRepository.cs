@@ -13,7 +13,7 @@ namespace Aurelyn.Application.Repositories
         private readonly string _connectionString;
         protected BaseRepository(IConfiguration configuration)
         {
-            _connectionString = configuration.GetConnectionString("ShopEaseConnection");
+            _connectionString = configuration.GetConnectionString("AurelynConnection");
         }
         public IDbConnection CreateConnection()
         {
