@@ -13,5 +13,6 @@
         public DateTime? UsedAt { get; set; }
         public string? IPAddress { get; set; }
         public DateTime CreatedDate { get; set; }
+        public int? ReturnValue { get; set; }
     }
 }

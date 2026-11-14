@@ -7,10 +7,21 @@
         public int TenantId { get; set; }
         public DateTime ExpiresAt { get; set; }
         public DateTime? RevokedAt { get; set; }
+        public string? RefreshTokenHash { get; set; }
         public string? DeviceInfo { get; set; }
         public string? IPAddress { get; set; }
         public DateTime CreatedDate { get; set; }
         public DateTime? LastUsedDate { get; set; }
         public int ReturnValue { get; set; }
+    }
+
+    public class RotateSession
+    {
+        public long SessionId { get; set; }
+        public string NewRefreshTokenHash { get; set; }
+        public DateTime NewExpiresAt { get; set; }
+        public string DeviceInfo { get; set; }
+        public string IpAddress { get; set; }
+        public int? ReturnValue { get; set; }
     }
 }
