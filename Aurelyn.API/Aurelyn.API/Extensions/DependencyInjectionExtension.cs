@@ -13,13 +13,15 @@ namespace Aurelyn.API.Extensions
             var otpSettings = configuration.GetSection("OtpSettings").Get<OtpSettings>() ?? new OtpSettings();
             services.AddSingleton(otpSettings);
 
+            var emailSettings = configuration.GetSection("EmailSettings").Get<EmailSettings>()
+                ?? throw new InvalidOperationException("EmailSettings section is missing in appsettings.");
+            services.AddSingleton(emailSettings);
 
             var appAssembly = typeof(Aurelyn.Application.AssemblyReference).Assembly;
 
             foreach (var type in appAssembly.GetTypes()
                 .Where(x => x.IsClass && !x.IsAbstract && x.Name.EndsWith("Service")))
             {
-                // Register all interfaces implemented by the service
                 var interfaceTypes = type.GetInterfaces()
                     .Where(i => i.Name != "IDisposable");
 
@@ -41,7 +43,6 @@ namespace Aurelyn.API.Extensions
                 }
             }
 
-            // Repositories loop stays the same
             foreach (var type in appAssembly.GetTypes()
                 .Where(x => x.IsClass
                          && !x.IsAbstract

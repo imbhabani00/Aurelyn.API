@@ -1,4 +1,4 @@
-﻿namespace Aurelyn.Domain.AuditLog
+﻿namespace Aurelyn.Domain.Models.AuditLog
 {
     public class AuditLog
     {

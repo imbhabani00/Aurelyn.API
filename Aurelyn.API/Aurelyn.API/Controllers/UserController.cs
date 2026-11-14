@@ -1,8 +1,8 @@
 ﻿using Asp.Versioning;
 using Aurelyn.Application.Dtos.Response;
 using Aurelyn.Application.Services;
-using Aurelyn.Domain.AuditLog;
-using Aurelyn.Domain.Authuntication;
+using Aurelyn.Domain.Models.AuditLog;
+using Aurelyn.Domain.Models.Authuntication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
@@ -96,9 +96,18 @@ namespace Aurelyn.API.Controllers
 
                 // the current session stays signed in, every other session is revoked
                 long? currentSessionId = CurrentSessionId;
-                var result = await _userService.ChangePasswordAsync(userId, tenantId, model.CurrentPassword, model.NewPassword, currentSessionId);
 
-                switch (result)
+                var resetPasswordDetails = new ResetPassword()
+                {
+                    UserId = userId,
+                    TenantId = tenantId,
+                    CurrentPassword = model.CurrentPassword,
+                    NewPassword = model.NewPassword,
+                    CurrentSessionId = model.CurrentSessionId
+                };
+                var result = await _userService.ChangePasswordAsync(resetPasswordDetails);
+
+                switch (result.ReturnValue)
                 {
                     case 0:
                         await WriteAuditAsync(tenantId, userId, "UPDATE", "tbl_Users", userId.ToString(), "Password changed, other sessions revoked");

@@ -1,6 +1,8 @@
 using Aurelyn.API.Extensions;
+using Aurelyn.Application.Dtos.Response;
 using FluentValidation;
 using FluentValidation.AspNetCore;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Serilog;
 using Serilog.Sinks.MSSqlServer;
@@ -46,7 +48,24 @@ try
     #endregion
 
     #region Service Binding
-    builder.Services.AddControllers();
+    builder.Services.AddControllers()
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        options.InvalidModelStateResponseFactory = context =>
+        {
+            var message = context.ModelState.Values
+                .SelectMany(v => v.Errors)
+                .Select(e => e.ErrorMessage)
+                .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m)) ?? "Invalid input";
+
+            return new ObjectResult(new ApiResponse
+            {
+                Status = false,
+                Message = message,
+                ErrorMessage = message
+            });
+        };
+    });
 
     builder.Services.AddSwaggerExtension();
 

@@ -98,11 +98,9 @@ namespace Aurelyn.Application.Services
             }
             catch (ArgumentException)
             {
-                // malformed token strings surface as ArgumentException
                 throw new SecurityTokenException("Invalid token");
             }
 
-            // Validate it's actually HmacSha256
             if (securityToken is not JwtSecurityToken jwtToken ||
                 !jwtToken.Header.Alg.Equals(
                     SecurityAlgorithms.HmacSha256,
@@ -116,8 +114,6 @@ namespace Aurelyn.Application.Services
         #endregion
 
         #region HashToken
-        // Refresh tokens are 64 random bytes, so a plain SHA-256 is enough.
-        // Only this hash is stored in tbl_UserSessions.
         public string HashToken(string token)
         {
             if (string.IsNullOrEmpty(token))
@@ -139,8 +135,6 @@ namespace Aurelyn.Application.Services
         #endregion
 
         #region HashOtp
-        // A 6 digit code is easy to brute force if the hash leaks, so it is
-        // hashed with HMAC and the server secret (plus user and purpose).
         public string HashOtp(int userId, string purpose, string code)
         {
             var keyBytes = Encoding.UTF8.GetBytes(_jwtSettings.SecretKey);

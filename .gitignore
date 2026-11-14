@@ -361,3 +361,8 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+/Aurelyn.API/Aurelyn.API/appsettings.json
+/.gitignore
+/.gitignore
+/Aurelyn.API/Aurelyn.API/appsettings.json
+/Aurelyn.API/Aurelyn.API/appsettings.json
