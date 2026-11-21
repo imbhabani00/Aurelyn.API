@@ -18,7 +18,8 @@ namespace Aurelyn.Application.Mapper
         {
             CreateMap<SaveResponse, GenericSaveResponse>();
             CreateMap<OtpCode, OtpResponse>();
-            CreateMap<User, UserResponse>();
+            CreateMap<User, UserResponse>()
+                 .ForMember(d => d.ProfilePictureUrl, o => o.Ignore());
             CreateMap<UserSession, UserSessionResponse>();
             CreateMap<AuthenticateResult, AuthenticateResultResponse>();
             CreateMap<LoginFailureResult, LoginFailureResponse>();

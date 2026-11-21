@@ -1,4 +1,5 @@
-﻿using Aurelyn.Domain.Settings;
+﻿using Aurelyn.Application.Services;
+using Aurelyn.Domain.Settings;
 
 namespace Aurelyn.API.Extensions
 {
@@ -17,10 +18,26 @@ namespace Aurelyn.API.Extensions
                 ?? throw new InvalidOperationException("EmailSettings section is missing in appsettings.");
             services.AddSingleton(emailSettings);
 
+            var storageSettings = configuration.GetSection("Storage").Get<StorageSettings>()
+                ?? throw new InvalidOperationException("Storage section is missing in appsettings.");
+
+            if (string.IsNullOrWhiteSpace(storageSettings.R2.AccountId) ||
+                string.IsNullOrWhiteSpace(storageSettings.R2.AccessKey) ||
+                string.IsNullOrWhiteSpace(storageSettings.R2.SecretKey))
+                throw new InvalidOperationException("Storage:R2 credentials are missing.");
+
+            services.Configure<StorageSettings>(configuration.GetSection("Storage"));
+            services.AddSingleton<IR2StorageService, R2StorageService>();
+
             var appAssembly = typeof(Aurelyn.Application.AssemblyReference).Assembly;
 
             foreach (var type in appAssembly.GetTypes()
-                .Where(x => x.IsClass && !x.IsAbstract && x.Name.EndsWith("Service")))
+                .Where(
+                x => x.IsClass && 
+                !x.IsAbstract &&
+                x.Name.EndsWith("Service") &&
+                x.Name != nameof(R2StorageService)
+                ))
             {
                 var interfaceTypes = type.GetInterfaces()
                     .Where(i => i.Name != "IDisposable");

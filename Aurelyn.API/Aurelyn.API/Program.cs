@@ -42,8 +42,9 @@ try
                 {
                     TableName = "tbl_Logs",
                     SchemaName = "dbo",
-                    AutoCreateSqlTable = true
-                });
+                    AutoCreateSqlTable = false
+                })
+            .WriteTo.File("logs/aurelyn-.log", rollingInterval: RollingInterval.Day);
     });
     #endregion
 
