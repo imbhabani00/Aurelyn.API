@@ -29,7 +29,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Aurelyn.Domain\Aurelyn.Domain.csproj" />
     <ProjectReference Include="..\Aurelyn.Application\Aurelyn.Application.csproj" />
     <ProjectReference Include="..\Aurelyn.Domain\Aurelyn.Domain.csproj" />
   </ItemGroup>

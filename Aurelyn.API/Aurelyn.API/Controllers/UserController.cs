@@ -1,8 +1,10 @@
 ﻿using Asp.Versioning;
+using Aurelyn.Application.Dtos.Request.User;
 using Aurelyn.Application.Dtos.Response;
 using Aurelyn.Application.Services;
 using Aurelyn.Domain.Models.AuditLog;
 using Aurelyn.Domain.Models.Authuntication;
+using Aurelyn.Domain.Models.User;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
@@ -52,7 +54,7 @@ namespace Aurelyn.API.Controllers
                     return new ObjectResult(apiResponse);
                 }
 
-                apiResponse = CreateSuccessResponse(user);
+                apiResponse = CreateSuccessApiResponse(user);
                 return new ObjectResult(apiResponse);
             }
             catch (Exception ex)
@@ -112,7 +114,7 @@ namespace Aurelyn.API.Controllers
                     case 0:
                         await WriteAuditAsync(tenantId, userId, "UPDATE", "tbl_Users", userId.ToString(), "Password changed, other sessions revoked");
                         _logger.LogInformation("ChangePassword: Password changed - UserId: {UserId}", userId);
-                        apiResponse = CreateSuccessResponse(new { Message = "Password changed successfully." });
+                        apiResponse = CreateSuccessApiResponse(new { Message = "Password changed successfully." });
                         break;
                     case 1:
                         apiResponse = CreateFailedApiResponse("", HttpStatusCode.NotFound, "User not found.");
@@ -164,6 +166,106 @@ namespace Aurelyn.API.Controllers
             {
                 _logger.LogError(ex, "Audit: Failed to write audit log - {ActionType} {TableName}", actionType, tableName);
             }
+        }
+        #endregion
+
+        #region UpdateProfile
+        [HttpPost]
+        [Route("profile-update")]
+        [Authorize]
+        public async Task<IActionResult> UpdateProfile(UserProfileUpdateRequest model)
+        {
+            var response = new ApiResponse();
+            try
+            {
+                var userId = CurrentUserId ?? 0;
+                var tenantId = CurrentTenantId ?? 0;
+
+                if (userId <= 0 || tenantId <= 0)
+                {
+                    return new ObjectResult(
+                        CreateFailedApiResponse(
+                            "",
+                            HttpStatusCode.Unauthorized,
+                            "Invalid or missing user authentication."
+                        )
+                    );
+                }
+                var data = await _userService.UpdateProfileAsync(model, userId, tenantId);
+
+                switch (data.ReturnValue)
+                {
+                    case 0:
+                        response = CreateSuccessApiResponse(
+                            data,
+                            HttpStatusCode.OK,
+                            "Profile updated successfully."
+                        );
+                        break;
+
+                    case 1:
+                        response = CreateFailedApiResponse(
+                            "",
+                            HttpStatusCode.NotFound,
+                            "User not found."
+                        );
+                        break;
+
+                    case 2:
+                        response = CreateFailedApiResponse(
+                            "",
+                            HttpStatusCode.Forbidden,
+                            "Your account or role is inactive."
+                        );
+                        break;
+
+                    default:
+                        response = CreateFailedApiResponse(
+                            "",
+                            HttpStatusCode.BadRequest,
+                            "Failed to update profile."
+                        );
+                        break;
+                }
+
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "UpdateProfile: Error occurred while updating profile");
+                response = CreateFailedApiResponse("", HttpStatusCode.InternalServerError, "An error occurred while processing your request");
+            }
+            return new ObjectResult(response);
+        }
+        #endregion
+
+        #region UpdateProfilePicture
+        [HttpPost("profile-picture-update")]
+        [Authorize]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> UpdateProfilePicture([FromForm] ProfilePictureUploadRequest profilePictureUploadRequest)
+        {
+            ApiResponse apiResponse;
+            try
+            {
+                var result = await _userService.UpdateProfilePictureAsync(
+                    CurrentUserId ?? 0, CurrentTenantId ?? 0, GetIpAddress(), profilePictureUploadRequest.File);
+
+                apiResponse = result.ReturnValue == 0
+                    ? CreateSuccessApiResponse(new { key = result.Key, url = result.Url },
+                                               HttpStatusCode.OK, "Profile picture updated successfully.")
+                    : CreateFailedApiResponse("", HttpStatusCode.NotFound, "User not found.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                apiResponse = CreateFailedApiResponse("", HttpStatusCode.BadRequest, ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "UpdateProfilePicture error");
+                apiResponse = CreateFailedApiResponse("", HttpStatusCode.InternalServerError,
+                                                      "An error occurred while processing your request");
+            }
+            return new ObjectResult(apiResponse);
         }
         #endregion
     }
