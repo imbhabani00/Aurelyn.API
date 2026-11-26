@@ -38,6 +38,19 @@ namespace Aurelyn.API.Extensions
                     IssuerSigningKey = key,
                     ClockSkew = TimeSpan.Zero
                 };
+                options.Events = new JwtBearerEvents
+                {
+                    OnAuthenticationFailed = ctx =>
+                    {
+                        Console.WriteLine("JWT FAILED: " + ctx.Exception.GetType().Name + " - " + ctx.Exception.Message);
+                        return Task.CompletedTask;
+                    },
+                    OnChallenge = ctx =>
+                    {
+                        Console.WriteLine($"JWT CHALLENGE: error={ctx.Error}, desc={ctx.ErrorDescription}, authHeader={(string.IsNullOrEmpty(ctx.Request.Headers.Authorization) ? "MISSING" : "present")}");
+                        return Task.CompletedTask;
+                    }
+                };
             });
 
             return services;
