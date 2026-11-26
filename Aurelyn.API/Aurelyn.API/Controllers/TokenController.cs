@@ -74,19 +74,38 @@ namespace Aurelyn.API.Controllers
                     switch (result.ReturnValue)
                     {
                         case 1:
-                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized, "Invalid credentials.");
+                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized,
+                                "Invalid credentials.");
                             break;
+
                         case 2:
-                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized, "User is inactive.");
+                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized,
+                                "Your account is inactive. Please contact support.");
                             break;
+
                         case 3:
-                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized, "Account is locked. Please try again later.");
+                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized,
+                                "Your account is locked. Please try again later.");
                             break;
-                        case 4:
-                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized, "Account is not verified or invitation is not accepted.");
+
+                        case 4: // PendingVerification
+                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized,
+                                "Your registration is not complete. Please register again with the same email and verify the OTP to continue.");
                             break;
+
+                        case 5: // PendingInvitation
+                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized,
+                                "Your invitation has not been accepted yet. Please accept the invitation sent to your email to activate your account.");
+                            break;
+
+                        case 6: // No password set
+                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized,
+                                "Your account setup is incomplete. Please set your password using the link sent to your email, or use Forgot Password.");
+                            break;
+
                         default:
-                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized, "Authentication failed.");
+                            apiResponse = CreateFailedApiResponse("", HttpStatusCode.Unauthorized,
+                                "Authentication failed.");
                             break;
                     }
                     return new ObjectResult(apiResponse);
@@ -139,7 +158,7 @@ namespace Aurelyn.API.Controllers
 
                 _logger.LogInformation("AccessToken: OTP sent - UserId: {UserId}", user.UserId);
 
-                apiResponse = CreateSuccessResponse(new
+                apiResponse = CreateSuccessApiResponse(new
                 {
                     OtpId = otpResult.OtpId,
                     Email = MaskEmail(user.Email),
@@ -256,7 +275,7 @@ namespace Aurelyn.API.Controllers
 
                 _logger.LogInformation("VerifyOtp: User authenticated successfully - UserId: {UserId}", user.UserId);
 
-                apiResponse = CreateSuccessResponse(new
+                apiResponse = CreateSuccessApiResponse(new
                 {
                     AccessToken = accessToken,
                     RefreshToken = refreshToken,
@@ -320,7 +339,7 @@ namespace Aurelyn.API.Controllers
                     {
                         apiResponse = CreateFailedApiResponse("", HttpStatusCode.TooManyRequests, $"Please wait {waitSeconds} second(s) before requesting a new OTP.");
                         return new ObjectResult(apiResponse);
-                    }
+                    }   
                 }
 
                 // hourly limit
@@ -361,7 +380,7 @@ namespace Aurelyn.API.Controllers
 
                 _logger.LogInformation("ResendOtp: OTP resent - UserId: {UserId}", user.UserId);
 
-                apiResponse = CreateSuccessResponse(new
+                apiResponse = CreateSuccessApiResponse(new
                 {
                     OtpId = newOtpResult.OtpId,
                     Email = MaskEmail(user.Email),
@@ -462,7 +481,7 @@ namespace Aurelyn.API.Controllers
                 // claims are rebuilt from the database so role changes apply on refresh
                 var newAccessToken = _tokenService.GenerateAccessToken(BuildClaims(user, clientApp, rotateSessionResponse.SessionId));
 
-                apiResponse = CreateSuccessResponse(new
+                apiResponse = CreateSuccessApiResponse(new
                 {
                     AccessToken = newAccessToken,
                     RefreshToken = newRefreshToken,
@@ -519,7 +538,7 @@ namespace Aurelyn.API.Controllers
 
                 _logger.LogInformation("Logout: User logged out - UserId: {UserId}", userId);
 
-                apiResponse = CreateSuccessResponse(new { Message = "Logged out successfully." });
+                apiResponse = CreateSuccessApiResponse(new { Message = "Logged out successfully." });
                 return new ObjectResult(apiResponse);
             }
             catch (Exception ex)
@@ -619,7 +638,7 @@ namespace Aurelyn.API.Controllers
                 switch (result.ReturnValue)
                 {
                     case 0:
-                        apiResponse = CreateSuccessResponse("", HttpStatusCode.OK, "Hey, you have registered successfully.");
+                        apiResponse = CreateSuccessApiResponse("", HttpStatusCode.OK, "Hey, you have registered successfully.");
                         break;
 
                     case 1:
@@ -638,7 +657,7 @@ namespace Aurelyn.API.Controllers
                         return new ObjectResult(apiResponse);
 
                     case 4:
-                        apiResponse = CreateSuccessResponse("", HttpStatusCode.OK, "Verification is pending. We are sending a new code.");
+                        apiResponse = CreateSuccessApiResponse("", HttpStatusCode.OK, "Verification is pending. We are sending a new code.");
                         break;
 
                     default:
@@ -684,7 +703,7 @@ namespace Aurelyn.API.Controllers
 
                 _logger.LogInformation("Register: Account created - UserId: {UserId}", result.UserId);
 
-                apiResponse = CreateSuccessResponse(new
+                apiResponse = CreateSuccessApiResponse(new
                 {
                     OtpId = otpResult.OtpId,
                     Email = MaskEmail(model.Email),
@@ -723,7 +742,7 @@ namespace Aurelyn.API.Controllers
                             apiResponse = CreateFailedApiResponse("", HttpStatusCode.TooManyRequests, error);
                             break;
                         }
-                        apiResponse = CreateSuccessResponse(new { }, HttpStatusCode.OK,
+                        apiResponse = CreateSuccessApiResponse(new { }, HttpStatusCode.OK,
                             "A verification code has been sent to your email.");
                         break;
 
@@ -819,10 +838,8 @@ namespace Aurelyn.API.Controllers
                         "Password and confirm password do not match."));
                 }
 
-                // ---------- 1. user lookup (Users_GetByEmail return value) ----------
                 var user = await _userService.GetByEmailAsync(model.Email.Trim(), model.TenantCode);
 
-                // SP exits without a row for 1, 2 and 4, so user can be null or empty
                 var lookupValue = (user == null || (user.UserId <= 0 && user.ReturnValue == 0)) ? 1 : user.ReturnValue;
 
                 switch (lookupValue)
@@ -849,7 +866,6 @@ namespace Aurelyn.API.Controllers
                 }
 
                 // ---------- 2. OTP state ----------
-                // 0 = valid code, 1 = no OTP, 2 = used, 3 = expired, 4 = too many attempts, 5 = wrong code
                 var otp = await _userService.GetLatestOtpAsync(user!.UserId, OtpPurposeConstant.PasswordReset);
 
                 var otpState =
@@ -936,7 +952,7 @@ namespace Aurelyn.API.Controllers
 
                         _logger.LogInformation("ResetPassword: Password reset - UserId: {UserId}", user.UserId);
 
-                        apiResponse = CreateSuccessResponse(new { Message = "Password reset successfully." },
+                        apiResponse = CreateSuccessApiResponse(new { Message = "Password reset successfully." },
                             HttpStatusCode.OK, "Password reset successfully.");
                         break;
 

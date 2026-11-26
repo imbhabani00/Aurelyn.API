@@ -1,7 +1,6 @@
 ﻿using Aurelyn.Application.Dtos.Response;
 using Aurelyn.Application.Dtos.Response.Login;
 using Aurelyn.Application.Dtos.Response.OtpResponse;
-using Aurelyn.Application.Dtos.Response.Register;
 using Aurelyn.Application.Dtos.Response.Session;
 using Aurelyn.Application.Dtos.Response.User;
 using Aurelyn.Application.Repositories;
@@ -12,8 +11,9 @@ using Aurelyn.Domain.Models.User;
 using Aurelyn.Domain.Otp;
 using Aurelyn.Domain.Session;
 using AutoMapper;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
-
+using Microsoft.Extensions.Logging;
 
 namespace Aurelyn.Application.Services
 {
@@ -44,6 +44,8 @@ namespace Aurelyn.Application.Services
         Task<UserLookupResponse> GetByEmailAsync(string email, string? tenantCode);
         Task<GenericSaveResponse> ResetPasswordAsync(ResetPassword resetPassword);
         Task<bool> IsSameAsCurrentPasswordAsync(int userId, int tenantId, string password);
+        Task<GenericSaveResponse> UpdateProfileAsync(UserProfileUpdateRequest model, int userId, int tenantId);
+        Task<ProfilePictureResponse> UpdateProfilePictureAsync(int userId, int tenantId, string ipAddress, IFormFile? file);
     }
     #endregion
 
@@ -56,16 +58,22 @@ namespace Aurelyn.Application.Services
         private const int DefaultBcryptWorkFactor = 12;
         private const int MinPasswordLength = 8;
         private const int MaxPasswordLength = 72;
+        private readonly ILogger<UserService> _logger;
+        private readonly IR2StorageService _r2StorageService;
         #endregion
 
         #region Constructor
         public UserService(IMapper mapper,
             IUserRepository userRepository,
-            IConfiguration config)
+            IConfiguration config,
+            ILogger<UserService> logger,
+            IR2StorageService r2StorageService)
         {
             _mapper = mapper;
             _userRepository = userRepository;
             _config = config;
+            _logger = logger;
+            _r2StorageService = r2StorageService;
         }
         #endregion
 
@@ -104,6 +112,7 @@ namespace Aurelyn.Application.Services
             }
 
             var response = _mapper.Map<User, UserResponse>(user);
+            response.ProfilePictureUrl = _r2StorageService.GetPublicUrl(response.ProfilePictureKey);
             return response;
         }
         #endregion
@@ -155,6 +164,7 @@ namespace Aurelyn.Application.Services
         }
         #endregion
 
+        #region ChangePasswordAsync
         public async Task<GenericSaveResponse> ChangePasswordAsync(ResetPassword resetPassword)
         {
             var currentHash = await _userRepository.GetPasswordHash(resetPassword.UserId, resetPassword.TenantId);
@@ -170,6 +180,7 @@ namespace Aurelyn.Application.Services
             await _userRepository.RevokeAllSessions(resetPassword.UserId, resetPassword.CurrentSessionId);
             return new GenericSaveResponse { ReturnValue = 0 };
         }
+        #endregion
 
         #region CreateOtpAsync
         public async Task<OtpResponse> CreateOtpAsync(OtpCode otpCode)
@@ -321,10 +332,78 @@ namespace Aurelyn.Application.Services
         }
         #endregion
 
+        #region IsSameAsCurrentPasswordAsync
         public async Task<bool> IsSameAsCurrentPasswordAsync(int userId, int tenantId, string password)
         {
             var hash = await _userRepository.GetPasswordHash(userId, tenantId);
             return !string.IsNullOrEmpty(hash) && VerifyPassword(password, hash);
         }
+        #endregion
+
+        #region UpdateProfileAsync
+        public async Task<GenericSaveResponse> UpdateProfileAsync(UserProfileUpdateRequest model, int userId, int tenantId)
+        {
+            var request = await _userRepository.UpdateProfile(model, userId, tenantId);
+            var response = _mapper.Map<SaveResponse, GenericSaveResponse>(request);
+            return response;
+        }
+        #endregion
+
+        #region UpdateProfilePictureAsync
+        public async Task<ProfilePictureResponse> UpdateProfilePictureAsync(int userId, int tenantId, string ipAddress, IFormFile? file)
+        {
+            string? newKey = null;
+
+            if (file is { Length: > 0 })
+            {
+                var ext = file.ContentType switch
+                {
+                    "image/jpeg" => ".jpg",
+                    "image/png" => ".png",
+                    "image/webp" => ".webp",
+                    _ => throw new InvalidOperationException("Only JPG, PNG or WEBP images are allowed.")
+                };
+                if (file.Length > 5 * 1024 * 1024)
+                    throw new InvalidOperationException("Image must be 5 MB or smaller.");
+
+                newKey = $"images/profile/{tenantId}/{userId}/{Guid.NewGuid():N}{ext}";
+                await using var stream = file.OpenReadStream();
+                await _r2StorageService.UploadAsync(stream, newKey, file.ContentType);
+            }
+
+            ProfilePicDbResult db;
+            try
+            {
+                db = await _userRepository.UpdateProfilePicture(userId, tenantId, ipAddress, newKey);
+            }
+            catch
+            {
+                if (newKey != null) await SafeDelete(newKey);
+                throw;
+            }
+
+            if (db.ReturnValue != 0)
+            {
+                if (newKey != null) await SafeDelete(newKey);
+                return new ProfilePictureResponse { ReturnValue = db.ReturnValue };
+            }
+
+            if (!string.IsNullOrEmpty(db.OldKey) && db.OldKey != newKey)
+                await SafeDelete(db.OldKey);
+
+            return new ProfilePictureResponse
+            {
+                ReturnValue = 0,
+                Key = newKey,
+                Url = _r2StorageService.GetPublicUrl(newKey)
+            };
+        }
+
+        private async Task SafeDelete(string key)
+        {
+            try { await _r2StorageService.DeleteAsync(key); }
+            catch (Exception ex) { _logger.LogWarning(ex, "R2 delete failed for {Key}", key); }
+        }
+        #endregion
     }
 }

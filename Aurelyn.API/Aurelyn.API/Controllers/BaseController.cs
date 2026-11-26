@@ -57,7 +57,7 @@ namespace Aurelyn.API.Controllers
             };
         }
 
-        protected ApiResponse CreateSuccessResponse(object response, HttpStatusCode statusCode = HttpStatusCode.OK, string message = "Success")
+        protected ApiResponse CreateSuccessApiResponse(object response, HttpStatusCode statusCode = HttpStatusCode.OK, string message = "Success")
         {
             return new ApiResponse
             {

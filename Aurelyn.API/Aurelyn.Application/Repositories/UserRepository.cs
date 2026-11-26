@@ -33,6 +33,8 @@ namespace Aurelyn.Application.Repositories
         Task InsertAuditLog(AuditLog auditLog);
         Task<SaveResponse> Register(Register register);
         Task<UserLookup> GetByEmail(string email, string? tenantCode);
+        Task<SaveResponse> UpdateProfile(UserProfileUpdateRequest model, int userId, int tenantId);
+        Task<ProfilePicDbResult> UpdateProfilePicture(int userId, int tenantId, string ipAddress, string? newKey);
     }
     #endregion
 
@@ -516,6 +518,60 @@ namespace Aurelyn.Application.Repositories
                 data.ReturnValue = parameters.Get<int>("@ReturnValue");
             }
             return data;
+        }
+        #endregion
+
+        #region UpdateProfile
+        public async Task<SaveResponse> UpdateProfile(UserProfileUpdateRequest model, int userId, int tenantId)
+        {
+            var data = new SaveResponse();
+            using (var dbConnection = CreateConnection())
+            {
+                var dynamicParameter = new DynamicParameters();
+                dynamicParameter.Add("@UserId", userId);
+                dynamicParameter.Add("@TenantId", tenantId);
+                dynamicParameter.Add("@FirstName", model.FirstName);
+                dynamicParameter.Add("@MiddleName", model.MiddleName);
+                dynamicParameter.Add("@LastName", model.LastName);
+                dynamicParameter.Add("@Email", model.Email);
+                dynamicParameter.Add("@PhoneNumber", model.PhoneNumber);
+                dynamicParameter.Add("@AddressLine1", model.AddressLine1);
+                dynamicParameter.Add("@AddressLine2", model.AddressLine2);
+                dynamicParameter.Add("@City", model.City);
+                dynamicParameter.Add("@State", model.State);
+                dynamicParameter.Add("@ZipCode", model.ZipCode);
+                dynamicParameter.Add("@Country", model.Country);
+                dynamicParameter.Add("@ReturnValue", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
+
+                await dbConnection.ExecuteAsync("[dbo].[Users_UpdateProfile]", dynamicParameter, commandType: CommandType.StoredProcedure);
+                data.ReturnValue = dynamicParameter.Get<int>("@ReturnValue");
+            }
+            return data;
+        }
+        #endregion
+
+        #region UpdateProfilePicture
+        public async Task<ProfilePicDbResult> UpdateProfilePicture(int userId, int tenantId, string ipAddress, string? newKey)
+        {
+            using var connection = CreateConnection();
+            var parameter = new DynamicParameters();
+
+            parameter.Add("@UserId", userId);
+            parameter.Add("@TenantId", tenantId);
+            parameter.Add("@ProfilePictureKey", newKey);
+            parameter.Add("@ModifiedBy", userId);
+            parameter.Add("@IPAddress", ipAddress);
+            parameter.Add("@ReturnValue", dbType: DbType.Int32, direction: ParameterDirection.ReturnValue);
+
+            var rows = await connection.QueryAsync<string?>(
+                "[dbo].[Users_ProfilePicUpdate]", parameter, commandType: CommandType.StoredProcedure);
+
+            var oldKey = rows.FirstOrDefault();
+            return new ProfilePicDbResult
+            {
+                ReturnValue = parameter.Get<int>("@ReturnValue"),
+                OldKey = oldKey
+            };
         }
         #endregion
     }
