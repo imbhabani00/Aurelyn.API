@@ -339,7 +339,7 @@ namespace Aurelyn.API.Controllers
                     {
                         apiResponse = CreateFailedApiResponse("", HttpStatusCode.TooManyRequests, $"Please wait {waitSeconds} second(s) before requesting a new OTP.");
                         return new ObjectResult(apiResponse);
-                    }
+                    }   
                 }
 
                 // hourly limit
